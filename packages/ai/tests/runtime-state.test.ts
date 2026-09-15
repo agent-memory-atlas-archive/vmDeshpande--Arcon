@@ -74,6 +74,42 @@ describe("RuntimeState", () => {
     assert.equal(convCap?.status, "PARTIAL");
   });
 
+  it("buildRuntimeCapabilities marks voice as NOT_IMPLEMENTED when hasVoice is false", () => {
+    const caps = buildRuntimeCapabilities({
+      identity: DEFAULT_RUNTIME_IDENTITY,
+      hasPersistentMemory: true,
+      hasConversationPersistence: true,
+      hasVoice: false,
+      hasWebAccess: false,
+      hasComputerControl: false,
+      hasBackgroundProcessing: false,
+      hasVectorSearch: false,
+      hasToolCalling: false,
+      hasStreaming: false,
+    });
+
+    const voiceCap = caps.capabilities.find((c) => c.name === "voice capabilities");
+    assert.equal(voiceCap?.status, "NOT_IMPLEMENTED");
+  });
+
+  it("buildRuntimeCapabilities marks voice as PARTIAL when hasVoice is true", () => {
+    const caps = buildRuntimeCapabilities({
+      identity: DEFAULT_RUNTIME_IDENTITY,
+      hasPersistentMemory: true,
+      hasConversationPersistence: true,
+      hasVoice: true,
+      hasWebAccess: false,
+      hasComputerControl: false,
+      hasBackgroundProcessing: false,
+      hasVectorSearch: false,
+      hasToolCalling: false,
+      hasStreaming: false,
+    });
+
+    const voiceCap = caps.capabilities.find((c) => c.name === "voice capabilities");
+    assert.equal(voiceCap?.status, "PARTIAL");
+  });
+
   it("buildRuntimeState returns degraded status when adapter is inactive on arcon-lora", () => {
     const state = buildRuntimeState({
       identity: {

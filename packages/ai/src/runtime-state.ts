@@ -94,10 +94,10 @@ export function buildRuntimeCapabilities(options: RuntimeStateOptions): RuntimeC
     },
     {
       name: "voice capabilities",
-      status: options.hasVoice ? "PARTIAL" : "PARTIAL",
+      status: options.hasVoice ? "PARTIAL" : "NOT_IMPLEMENTED",
       notes: options.hasVoice
-        ? "STT/TTS interfaces integrated"
-        : "STT/TTS interfaces exist; not fully integrated into chat runtime",
+        ? "STT/TTS interfaces exist; not fully integrated into chat runtime"
+        : "No voice interface available",
     },
     {
       name: "tool calling",

@@ -136,6 +136,20 @@ describe("ChatService capability recall", () => {
     service.close();
   });
 
+  it("short-circuits self-identity queries without LLM when adapter is inactive", async () => {
+    const aiClient = new MockAiClient();
+    const { service } = createService(aiClient, { adapterActive: false });
+
+    const result = await service.chat("Who are you?");
+
+    assert.equal(aiClient.callCount, 0);
+    assert.ok(result.reply.includes("Arcon"), "should still identify as Arcon");
+    assert.ok(result.reply.includes("Qwen/Qwen3-4B"), "should state base model");
+    assert.ok(!result.reply.toLowerCase().includes("arcon-v1"), "should not claim adapter");
+
+    service.close();
+  });
+
   it("short-circuits identity questions without LLM when adapter is inactive", async () => {
     const aiClient = new MockAiClient();
     const { service } = createService(aiClient, { adapterActive: false });

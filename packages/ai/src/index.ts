@@ -1,5 +1,6 @@
 import type { AiClient, ChatMessage } from "@arcon/shared";
 export * from "./inference/arcon-lora-provider.js";
+export * from "./inference/ling3-tiny-provider.js";
 export * from "./prompt-builder.js";
 export * from "./chat-service.js";
 export * from "./conversation-context.js";

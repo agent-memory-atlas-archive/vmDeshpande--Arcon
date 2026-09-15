@@ -71,6 +71,11 @@ export class MemoryPipeline {
       }
 
       const existingMemories = await this.getActiveMemories(candidate.type);
+      const terminalExactMatch = await this.getExactMatchAnyStatus(candidate);
+      if (terminalExactMatch) {
+        result.ignored += 1;
+        continue;
+      }
       const review = reviewCandidate(candidate, existingMemories, message);
 
       // console.log("Review Decision:", review.decision, candidate.content);

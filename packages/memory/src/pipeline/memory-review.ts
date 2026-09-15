@@ -257,7 +257,11 @@ function findBestMatch(candidate: MemoryCandidate, memories: Memory[]): MatchRes
 
   for (const memory of memories) {
     const similarity = calculateSimilarity(candidate.content, memory.content);
-    if (!bestMatch || similarity > bestMatch.similarity) {
+    const candidateIsBetter =
+      !bestMatch ||
+      similarity > bestMatch.similarity ||
+      (similarity === bestMatch.similarity && new Date(memory.updatedAt).getTime() > new Date(bestMatch.memory.updatedAt).getTime());
+    if (candidateIsBetter) {
       bestMatch = { memory, similarity };
     }
   }
@@ -433,6 +437,7 @@ function findSupersessionTargetByOriginalMessage(
 
   let bestMatch: Memory | undefined;
   let bestShared = 0;
+  let bestUpdatedAt = "";
 
   for (const memory of memories) {
     const memoryWords = new Set(tokenize(memory.content.toLowerCase()));
@@ -440,9 +445,10 @@ function findSupersessionTargetByOriginalMessage(
     const sharedWithOriginal = [...originalWords].filter((token) => memoryWords.has(token)).length;
     const totalShared = sharedWithCandidate + sharedWithOriginal;
 
-    if (totalShared > bestShared) {
+    if (totalShared > bestShared || (totalShared === bestShared && memory.updatedAt > bestUpdatedAt)) {
       bestShared = totalShared;
       bestMatch = memory;
+      bestUpdatedAt = memory.updatedAt;
     }
   }
 
@@ -526,6 +532,7 @@ function findCrossTypeSupersessionTarget(candidate: MemoryCandidate, memories: M
 
   let bestMatch: Memory | undefined;
   let bestSimilarity = 0;
+  let bestUpdatedAt = "";
 
   for (const memory of memories) {
     if (memory.status === MemoryStatus.SUPERSEDED || memory.status === MemoryStatus.PENDING_CONFIRMATION) {
@@ -538,9 +545,10 @@ function findCrossTypeSupersessionTarget(candidate: MemoryCandidate, memories: M
     }
 
     const similarity = calculateSimilarity(candidate.content, memory.content);
-    if (similarity > bestSimilarity) {
+    if (similarity > bestSimilarity || (similarity === bestSimilarity && memory.updatedAt > bestUpdatedAt)) {
       bestSimilarity = similarity;
       bestMatch = memory;
+      bestUpdatedAt = memory.updatedAt;
     }
   }
 

@@ -33,6 +33,26 @@ function createRecall(identity: Partial<typeof DEFAULT_RUNTIME_IDENTITY> = {}) {
 }
 
 describe("CapabilityRecall", () => {
+  it("does not claim adapter behavioral tuning when adapter is inactive for model queries", () => {
+    const recall = createRecall({ adapterActive: false, adapterName: "none" });
+    const result = recall.handleMessage("What model are you running?");
+
+    assert.ok(result.reply);
+    assert.ok(!result.reply?.toLowerCase().includes("behavioral tuning"), "should not claim adapter tuning when inactive");
+    assert.ok(result.reply?.toLowerCase().includes("no adapter") || result.reply?.toLowerCase().includes("without"), "should indicate no adapter");
+    assert.equal(result.category, "model");
+  });
+
+  it("does not claim adapter applied when inactive for base_model queries", () => {
+    const recall = createRecall({ adapterActive: false, adapterName: "none" });
+    const result = recall.handleMessage("What base model underlies you?");
+
+    assert.ok(result.reply);
+    assert.ok(!result.reply?.toLowerCase().includes("applied"), "should not say adapter is applied");
+    assert.ok(result.reply?.toLowerCase().includes("base model"), "should mention base model");
+    assert.equal(result.category, "model");
+  });
+
   it("recognizes model queries", () => {
     const recall = createRecall({ baseModel: "Qwen/Qwen3-4B", adapterName: "arcon-v1", adapterVersion: "rank-8", adapterActive: true });
     const result = recall.handleMessage("What model are you running?");
@@ -92,6 +112,17 @@ describe("CapabilityRecall", () => {
 
     assert.ok(result.reply);
     assert.equal(result.category, "tools");
+  });
+
+  it("does not claim adapter in self-identity when adapter is inactive", () => {
+    const recall = createRecall({ adapterActive: false, adapterName: "none", baseModel: "Qwen/Qwen3-4B" });
+    const result = recall.handleMessage("Who are you?");
+
+    assert.ok(result.reply);
+    assert.equal(result.category, "self_identity");
+    assert.ok(result.reply?.includes("Arcon"), "should still identity as Arcon");
+    assert.ok(result.reply?.includes("Qwen/Qwen3-4B"), "should state base model");
+    assert.ok(!result.reply?.toLowerCase().includes("with the none adapter"), "should not claim adapter");
   });
 
   it("recognizes self-identity queries", () => {

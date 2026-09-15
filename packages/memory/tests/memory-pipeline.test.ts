@@ -50,7 +50,36 @@ describe("MemoryPipeline", () => {
     assert(memories[0].content.includes("TypeScript"));
   });
 
-  it("ignores exact duplicate memories", async () => {
+  it("ignores exact duplicate memories in terminal state", async () => {
+    const first = await pipeline.processCandidates([
+      {
+        type: MemoryType.FACT,
+        content: "User prefers TypeScript",
+        confidenceScore: 0.9,
+        importanceScore: 6,
+        sourceType: MemorySourceType.USER_EXPLICIT,
+        reasoning: "test",
+      },
+    ]);
+
+    assert.strictEqual(first.created, 1);
+
+    const second = await pipeline.processCandidates([
+      {
+        type: MemoryType.FACT,
+        content: "User prefers TypeScript",
+        confidenceScore: 0.9,
+        importanceScore: 6,
+        sourceType: MemorySourceType.USER_EXPLICIT,
+        reasoning: "test",
+      },
+    ]);
+
+    assert.strictEqual(second.created, 0);
+    assert.strictEqual(second.ignored, 1);
+  });
+
+  it("ignores exact duplicate memories via processMessage", async () => {
     await pipeline.processMessage("My favorite language is TypeScript");
 
     const result = await pipeline.processMessage(
@@ -59,6 +88,29 @@ describe("MemoryPipeline", () => {
 
     assert.strictEqual(result.created, 0);
     assert.strictEqual(result.ignored, 1);
+  });
+
+  it("does not re-create memories with exact content in terminal status via processMessage", async () => {
+    const existing = repository.createMemory({
+      type: MemoryType.PREFERENCE,
+      content: "User prefers vanilla JavaScript",
+      importanceScore: 5,
+      confidenceScore: 0.9,
+      sourceType: MemorySourceType.USER_EXPLICIT,
+      status: MemoryStatus.SUPERSEDED,
+    });
+
+    const result = await pipeline.processMessage(
+      "I prefer vanilla JavaScript",
+    );
+
+    assert.strictEqual(result.created, 0);
+    assert.strictEqual(result.ignored, 1);
+
+    const all = repository.listMemories({ type: MemoryType.PREFERENCE });
+    assert.strictEqual(all.length, 1);
+    assert.strictEqual(all[0].id, existing.id);
+    assert.strictEqual(all[0].status, MemoryStatus.SUPERSEDED);
   });
 
   it("normalizes relationship synonyms before storing duplicates", async () => {

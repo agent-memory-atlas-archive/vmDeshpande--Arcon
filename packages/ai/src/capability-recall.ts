@@ -64,15 +64,29 @@ export class CapabilityRecall {
 
     switch (query) {
       case "model":
+        if (identity.adapterActive) {
+          return {
+            reply: `I run on ${identity.baseModel} with the ${identity.adapterName} adapter. Arcon is the full companion system; the base model is the underlying language engine and the adapter provides my behavioral tuning.`,
+            confidence: 0.95,
+            category: "model",
+          };
+        }
         return {
-          reply: `I run on ${identity.baseModel} with the ${identity.adapterName} adapter. Arcon is the full companion system; the base model is the underlying language engine and the adapter provides my behavioral tuning.`,
+          reply: `I run on ${identity.baseModel} without an active adapter. Arcon is the full companion system; the base model is the underlying language engine. No behavioral adapter is currently loaded.`,
           confidence: 0.95,
           category: "model",
         };
 
       case "base_model":
+        if (identity.adapterActive) {
+          return {
+            reply: `My underlying base model is ${identity.baseModel}. The Arcon adapter (${identity.adapterName}) is applied on top to give me my behavioral characteristics.`,
+            confidence: 0.98,
+            category: "model",
+          };
+        }
         return {
-          reply: `My underlying base model is ${identity.baseModel}. The Arcon adapter (${identity.adapterName}) is applied on top to give me my behavioral characteristics.`,
+          reply: `My underlying base model is ${identity.baseModel}. No adapter is currently applied; I am running the base model without behavioral tuning.`,
           confidence: 0.98,
           category: "model",
         };
@@ -176,8 +190,15 @@ export class CapabilityRecall {
         };
 
       case "self_identity":
+        if (identity.adapterActive) {
+          return {
+            reply: `I am ${ARCON_IDENTITY.name}, ${ARCON_IDENTITY.purpose} I was created by ${ARCON_IDENTITY.creator}. My underlying base model is ${identity.baseModel} with the ${identity.adapterName} adapter.`,
+            confidence: 0.98,
+            category: "self_identity",
+          };
+        }
         return {
-          reply: `I am ${ARCON_IDENTITY.name}, ${ARCON_IDENTITY.purpose} I was created by ${ARCON_IDENTITY.creator}. My underlying base model is ${identity.baseModel} with the ${identity.adapterName} adapter.`,
+          reply: `I am ${ARCON_IDENTITY.name}, ${ARCON_IDENTITY.purpose} I was created by ${ARCON_IDENTITY.creator}. My underlying base model is ${identity.baseModel}. No adapter is currently active.`,
           confidence: 0.98,
           category: "self_identity",
         };
