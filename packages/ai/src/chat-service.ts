@@ -760,10 +760,9 @@ export class ChatService {
       arconInterests,
     );
 
-    // Await the deferred memory extraction + processing now.
-    // This does not block the response (it already completed above), but ensures
-    // memory state is consistent before the next turn begins.
-    memoryPromise.then(async (semanticMemories) => {
+    try {
+      const semanticMemories = await memoryPromise;
+
       const validator = new SemanticValidator();
       const normalizer = new SemanticNormalizer();
 
@@ -795,9 +794,9 @@ export class ChatService {
       } else {
         await this.pipeline.processMessage(resolvedMessage);
       }
-    }).catch(() => {
+    } catch {
       /* Memory processing failure must not crash the conversation */
-    });
+    }
 
     return {
       prompt,

@@ -10,6 +10,7 @@ export * from "./runtime-state.js";
 export * from "./runtime-identity.js";
 export * from "./runtime-capabilities.js";
 export * from "./capability-recall.js";
+export * from "./model-provider.js";
 
 export interface OllamaClientOptions {
   baseUrl: string;
