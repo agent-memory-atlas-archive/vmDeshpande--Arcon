@@ -39,6 +39,7 @@ import type { RuntimeIdentity } from "./runtime-identity.js";
 import type { RuntimeCapabilities } from "./runtime-capabilities.js";
 import { buildRuntimeCapabilities } from "./runtime-state.js";
 import { CapabilityRecall, createCapabilityRecall } from "./capability-recall.js";
+import { ToolExecutor, type ToolResult } from "./tools/index.js";
 
 export interface ChatResult {
   prompt: string;
@@ -55,6 +56,7 @@ export interface ChatServiceOptions {
   runtimeCapabilities?: RuntimeCapabilities;
   hasStreaming?: boolean;
   contextWindow?: number;
+  toolExecutor?: ToolExecutor;
 }
 
 export class ChatService {
@@ -76,6 +78,7 @@ export class ChatService {
   private readonly runtimeCapabilities: RuntimeCapabilities;
   private readonly contextWindow: number;
   private readonly capabilityRecall: CapabilityRecall;
+  public readonly toolExecutor?: ToolExecutor;
 
   constructor(
     private readonly repository: MemoryRepository,
@@ -167,6 +170,8 @@ export class ChatService {
       status: this.runtimeIdentity.adapterActive ? "ready" : "degraded",
     });
 
+    this.toolExecutor = options.toolExecutor;
+
     this.reconstructContext();
   }
 
@@ -187,6 +192,21 @@ export class ChatService {
     }));
 
     this.conversationContext.loadFromMessages(this.conversationId, sources);
+  }
+
+  async executeTool(toolName: string, input: Record<string, unknown>): Promise<ToolResult> {
+    if (!this.toolExecutor) {
+      return {
+        success: false,
+        toolName,
+        status: "error",
+        error: "No tool executor configured",
+        code: "NO_EXECUTOR",
+        durationMs: 0,
+      };
+    }
+
+    return this.toolExecutor.execute(toolName, input);
   }
 
   private tryCapabilityRecall(message: string, intent: string): ChatResult | null {
