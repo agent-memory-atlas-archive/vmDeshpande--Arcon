@@ -2,6 +2,8 @@ import type { ContextSelection, ContextSnapshot } from "./cognitive/context-sele
 import type { CognitiveDecision } from "./cognitive-adapter.js";
 import type { RuntimeCapabilities } from "./runtime-capabilities.js";
 import type { RuntimeIdentity } from "./runtime-identity.js";
+import type { ToolResult } from "./tools/tool.js";
+import { formatToolResults } from "./tools/tool-result-formatter.js";
 
 export interface PromptBuildInput {
   systemPrompt: string;
@@ -17,6 +19,7 @@ export interface PromptBuildInput {
   };
   capabilities?: RuntimeCapabilities;
   runtimeIdentity?: RuntimeIdentity;
+  toolResults?: ToolResult[];
 }
 
 export class PromptBuilder {
@@ -129,6 +132,10 @@ export class PromptBuilder {
         sections.push(line);
       }
       sections.push("");
+    }
+
+    if (input.toolResults && input.toolResults.length > 0) {
+      sections.push(formatToolResults(input.toolResults));
     }
 
     if (input.conversationHistory.length > 0) {
