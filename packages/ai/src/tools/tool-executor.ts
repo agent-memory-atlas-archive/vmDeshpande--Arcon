@@ -18,6 +18,18 @@ export class ToolExecutor {
     this.logger = options.logger ?? createLogger(options.logEnabled ?? false);
   }
 
+  getTools(): Tool[] {
+    return this.registry.list();
+  }
+
+  get(name: string): Tool | undefined {
+    return this.registry.get(name);
+  }
+
+  list(): Tool[] {
+    return this.registry.list();
+  }
+
   async execute(toolName: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
     const tool = this.registry.get(toolName);
 

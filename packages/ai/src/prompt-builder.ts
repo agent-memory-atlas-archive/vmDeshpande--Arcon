@@ -20,6 +20,7 @@ export interface PromptBuildInput {
   capabilities?: RuntimeCapabilities;
   runtimeIdentity?: RuntimeIdentity;
   toolResults?: ToolResult[];
+  toolDefinitions?: string;
 }
 
 export class PromptBuilder {
@@ -136,6 +137,12 @@ export class PromptBuilder {
 
     if (input.toolResults && input.toolResults.length > 0) {
       sections.push(formatToolResults(input.toolResults));
+    }
+
+    if (input.toolDefinitions) {
+      sections.push("TOOLS:");
+      sections.push(input.toolDefinitions);
+      sections.push("");
     }
 
     if (input.conversationHistory.length > 0) {

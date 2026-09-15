@@ -39,7 +39,7 @@ import type { RuntimeIdentity } from "./runtime-identity.js";
 import type { RuntimeCapabilities } from "./runtime-capabilities.js";
 import { buildRuntimeCapabilities } from "./runtime-state.js";
 import { CapabilityRecall, createCapabilityRecall } from "./capability-recall.js";
-import { ToolExecutor, type ToolResult } from "./tools/index.js";
+import { ToolExecutor, type ToolResult, type ToolLoopOptions, executeToolLoop, describeAllTools } from "./tools/index.js";
 
 export interface ChatResult {
   prompt: string;
@@ -57,6 +57,7 @@ export interface ChatServiceOptions {
   hasStreaming?: boolean;
   contextWindow?: number;
   toolExecutor?: ToolExecutor;
+  maxToolIterations?: number;
 }
 
 export class ChatService {
@@ -79,6 +80,7 @@ export class ChatService {
   private readonly contextWindow: number;
   private readonly capabilityRecall: CapabilityRecall;
   public readonly toolExecutor?: ToolExecutor;
+  private readonly maxToolIterations: number;
 
   constructor(
     private readonly repository: MemoryRepository,
@@ -170,6 +172,8 @@ export class ChatService {
       status: this.runtimeIdentity.adapterActive ? "ready" : "degraded",
     });
 
+    this.maxToolIterations = options.maxToolIterations ?? 5;
+
     this.toolExecutor = options.toolExecutor;
 
     this.reconstructContext();
@@ -207,6 +211,89 @@ export class ChatService {
     }
 
     return this.toolExecutor.execute(toolName, input);
+  }
+
+  private buildToolDefinitions(): string {
+    if (!this.toolExecutor) {
+      return "";
+    }
+    const registeredTools = this.toolExecutor.getTools();
+    if (registeredTools.length === 0) {
+      return "";
+    }
+    return describeAllTools(registeredTools);
+  }
+
+  private async runToolLoop(
+    systemPrompt: string,
+    userMessage: string,
+  ): Promise<{ finalReply: string; toolResults: ToolResult[] }> {
+    const toolDefinitions = this.buildToolDefinitions();
+    const fullSystemPrompt = toolDefinitions
+      ? `${systemPrompt}\n\nTOOLS:\n${toolDefinitions}`
+      : systemPrompt;
+
+    const result = await executeToolLoop({
+      getModelResponse: async (messages) => {
+        const builtPrompt = new PromptBuilder().build({
+          systemPrompt: fullSystemPrompt,
+          context: {
+            understanding: {
+              intent: "GENERAL",
+              subject: "general",
+              topic: null,
+              requiresMemory: false,
+              requiresEmotion: false,
+              requiresInterests: false,
+              requiresIdentity: false,
+              requiresProjects: false,
+              requiresConversation: false,
+              requiresArconState: false,
+              isQuestion: false,
+              isAmbiguous: false,
+              confidence: 0.8,
+            },
+            memories: [],
+            includeUserProfile: false,
+            includeArconIdentity: false,
+            includeEmotionState: false,
+            includeInterests: false,
+            includeProjects: false,
+            includeRecentConversation: false,
+            includeRelevantPastConversations: false,
+            maxConversationTurns: 6,
+            maxPastConversations: 1,
+            maxMemories: 5,
+            selectedTopics: [],
+            excludedTopics: [],
+          },
+          conversationHistory: messages
+            .filter((m) => m.role !== "system")
+            .map((m) => m.content),
+          userMessage: messages.length > 0 ? messages[messages.length - 1].content : "",
+        });
+        const responseMessages: ChatMessage[] = [
+          {
+            conversationId: this.conversationId,
+            role: "system",
+            content: builtPrompt,
+            createdAt: new Date().toISOString(),
+          },
+          ...messages.map((m) => ({
+            conversationId: this.conversationId,
+            role: m.role as "user" | "assistant" | "system",
+            content: m.content,
+            createdAt: new Date().toISOString(),
+          })),
+        ];
+        return this.aiClient.generateReply(responseMessages);
+      },
+      executor: this.toolExecutor!,
+      registry: this.toolExecutor!,
+      maxIterations: this.maxToolIterations,
+    });
+
+    return result;
   }
 
   private tryCapabilityRecall(message: string, intent: string): ChatResult | null {
@@ -520,7 +607,14 @@ export class ChatService {
     ];
 
     const rawReply = await this.aiClient.generateReply(messages);
-    const reply = stripThinkTokens(rawReply);
+    let reply: string;
+
+    if (this.toolExecutor) {
+      const loopResult = await this.runToolLoop(prompt, resolvedMessage);
+      reply = stripThinkTokens(loopResult.finalReply);
+    } else {
+      reply = stripThinkTokens(rawReply);
+    }
 
     this.processAssistantResponse(
       reply,
@@ -773,8 +867,15 @@ export class ChatService {
 
     const cleanedReply = stripThinkTokens(fullReply);
 
+    let finalReply = cleanedReply;
+
+    if (this.toolExecutor) {
+      const loopResult = await this.runToolLoop(prompt, resolvedMessage);
+      finalReply = stripThinkTokens(loopResult.finalReply);
+    }
+
     this.processAssistantResponse(
-      cleanedReply,
+      finalReply,
       cognitiveResult.strategy,
       intent,
       arconInterests,
@@ -820,7 +921,7 @@ export class ChatService {
 
     return {
       prompt,
-      reply: cleanedReply,
+      reply: finalReply,
     };
   }
 
