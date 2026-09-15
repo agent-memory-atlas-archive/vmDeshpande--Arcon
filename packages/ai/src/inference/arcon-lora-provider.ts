@@ -144,7 +144,7 @@ export class ArconLoRAProvider implements AiClient {
     try {
       const response = await fetch(`${this.baseUrl}/health`, {
         method: "GET",
-        signal: AbortSignal.timeout(5_000),
+        signal: AbortSignal.timeout(this.timeoutMs),
       });
       if (!response.ok) {
         return false;
@@ -164,7 +164,7 @@ export class ArconLoRAProvider implements AiClient {
 
     const response = await fetch(`${this.baseUrl}/v1/models`, {
       method: "GET",
-      signal: AbortSignal.timeout(5_000),
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
 
     if (!response.ok) {
