@@ -58,7 +58,7 @@ export function createSearchFilesTool(options: SearchFilesToolOptions): Tool {
 
   return {
     name: "search_files",
-    description: "Search files within approved directories. Excludes node_modules, .git, build output, and sensitive files.",
+    description: "Use to find files by name within an allowed root. Requires query and path. Excludes binary, media, and sensitive files.",
     inputSchema: {
       type: "object",
       properties: {

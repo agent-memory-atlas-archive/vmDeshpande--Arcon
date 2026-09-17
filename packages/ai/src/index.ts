@@ -9,6 +9,7 @@ export * from "./cognitive-adapter.js";
 export * from "./context/intent-classifier.js";
 export * from "./experience/experience-classifier.js";
 export * from "./runtime-state.js";
+export * from "./runtime-diagnostics.js";
 export * from "./runtime-identity.js";
 export * from "./runtime-capabilities.js";
 export * from "./capability-recall.js";

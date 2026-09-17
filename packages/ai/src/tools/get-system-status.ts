@@ -6,7 +6,7 @@ export interface GetSystemStatusToolOptions {}
 export function createGetSystemStatusTool(_options: GetSystemStatusToolOptions): Tool {
   return {
     name: "get_system_status",
-    description: "Returns safe read-only system information: CPU, RAM, disk, OS, hostname. Does not expose secrets.",
+    description: "Use when asked about CPU, memory, disk, OS, hostname, or system health. Returns safe read-only system info. Never exposes secrets.",
     inputSchema: {
       type: "object",
       properties: {},

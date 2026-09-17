@@ -17,7 +17,7 @@ export function createReadFileTool(options: ReadFileToolOptions): Tool {
 
   return {
     name: "read_file",
-    description: "Read-only file access. Restricted to approved directories. Prevents path traversal and blocks sensitive files.",
+    description: "Use to read a text file. Requires path within allowed root. Blocks hidden files, secrets, and large files.",
     inputSchema: {
       type: "object",
       properties: {

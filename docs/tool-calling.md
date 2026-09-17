@@ -114,3 +114,31 @@ const service = new ChatService(repository, pipeline, aiClient, { toolExecutor: 
 ```
 
 Future tools (file writing, web access, browser automation, etc.) follow the same registration pattern. They require separate approval before implementation.
+
+## Runtime Integration Tests
+
+The `runtime-integration.test.ts` test suite exercises the actual end-to-end path through ChatService with real local tools:
+
+1. **One successful real tool call** - get_current_time via ChatService
+2. **Multi-step tool sequence** - get_system_status → get_current_time
+3. **Invalid arguments** - missing required field → VALIDATION_ERROR
+4. **Unknown tool** - unregistered tool → NOT_FOUND
+5. **Path traversal blocked** - file outside allowed root → PATH_DENIED
+6. **Tool execution failure** - tool throws → EXECUTION_ERROR
+7. **Final response uses tool result** - model incorporates result into answer
+
+### Running runtime tests (requires inference service):
+
+```bash
+# Start the inference service first (see docs/local-integration.md)
+npx tsx --test tests/runtime-integration.test.ts
+npx tsx --test tests/runtime-verification.test.ts
+```
+
+## Known Limitations (Qwen3-4B)
+
+1. **Response latency**: ~4-5 seconds for simple responses on RTX 3050 6GB (4-bit quantized).
+2. **Tool call format**: Model may occasionally output tool calls without proper markdown code blocks. Malformed calls are safely treated as final replies.
+3. **Iteration limit**: Default max 5 iterations may be reached for complex multi-step tasks.
+4. **No streaming tool calls**: Tool execution is sequential after the main response.
+5. **Model warmup**: First inference after service start is slower due to model loading.

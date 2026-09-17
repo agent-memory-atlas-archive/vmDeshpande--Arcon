@@ -16,7 +16,7 @@ export function createListDirectoryTool(options: ListDirectoryToolOptions): Tool
 
   return {
     name: "list_directory",
-    description: "Read-only directory listing. Restricted to approved root directories with path traversal prevention.",
+    description: "Use to list files in a directory. Requires a path within an allowed root. Returns entries labeled as file or directory.",
     inputSchema: {
       type: "object",
       properties: {

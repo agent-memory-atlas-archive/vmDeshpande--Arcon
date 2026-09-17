@@ -8,7 +8,7 @@ export interface RuntimeInfoToolOptions {
 export function createGetRuntimeInfoTool(options: RuntimeInfoToolOptions): Tool {
   return {
     name: "get_runtime_info",
-    description: "Returns information about the current Arcon runtime including model, adapter, and capability status.",
+    description: "Use when asked about system version, model, adapter, or capabilities. Returns Arcon runtime identity and capability status.",
     inputSchema: {
       type: "object",
       properties: {},

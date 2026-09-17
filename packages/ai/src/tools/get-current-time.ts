@@ -5,7 +5,7 @@ export interface GetCurrentTimeToolOptions {}
 export function createGetCurrentTimeTool(_options: GetCurrentTimeToolOptions): Tool {
   return {
     name: "get_current_time",
-    description: "Returns current local time, UTC time, date, timezone, and weekday.",
+    description: "Use when asked about time, date, timezone, or day of week. Returns current local time, UTC time, date, timezone, and weekday.",
     inputSchema: {
       type: "object",
       properties: {},
