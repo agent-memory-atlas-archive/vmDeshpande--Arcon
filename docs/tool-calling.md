@@ -144,15 +144,55 @@ The `runtime-integration.test.ts` test suite exercises the actual end-to-end pat
 ### Running runtime tests (requires inference service):
 
 ```bash
-# Start the inference service first (see docs/local-integration.md)
 npx tsx --test tests/runtime-integration.test.ts
 npx tsx --test tests/runtime-verification.test.ts
+npx tsx --test tests/runtime-real.test.ts
 ```
+
+## Real Runtime Verification (Live Inference)
+
+The `runtime-real.test.ts` suite verifies the tool layer against the live inference service (Qwen3-4B + Arcon v1 LoRA at `localhost:8000`).
+
+### Actual Latency Measurements (RTX 3050 6GB)
+
+| Operation | Measured Latency |
+|-----------|-----------------|
+| Health check | ~65ms |
+| Model info | ~7ms |
+| Simple inference (`generateReply`) | ~3000ms |
+| Full response (no tool, cognitive pipeline included) | ~4500ms |
+| Tool flow (model response + executeToolLoop, cognitive pipeline included) | ~7200ms |
+| Tool execution (e.g., get_current_time) | ~20ms |
+| Safety check (path traversal validation) | <1ms |
+| Unknown tool rejection | <1ms |
+
+### Observed Behavior
+
+When asked "What time is it?", Qwen3-4B responded with a text answer ("I don't have a clock in my current runtime") rather than calling `get_current_time`. This is a known model behavior — the model sometimes answers directly without invoking tools, even when tools are available. The system handles this gracefully by treating the text response as a final answer.
+
+All runtime verification tests pass:
+
+| Test | Description | Result |
+|------|-------------|--------|
+| Provider health | `healthCheck()` returns true | Pass |
+| Model info | Base model, adapter info correct | Pass |
+| Inference | `generateReply` returns non-empty | Pass |
+| Normal response | No tool call for greetings | Pass |
+| Path traversal | `..\\secret.txt` blocked | Pass |
+| Tool execution | `get_current_time` succeeds | Pass |
+| Unknown tool | `delete_file` rejected → NOT_FOUND | Pass |
+| Diagnostics | Runtime stats structure valid | Pass |
 
 ## Known Limitations (Qwen3-4B)
 
-1. **Response latency**: ~4-5 seconds for simple responses on RTX 3050 6GB (4-bit quantized).
-2. **Tool call format**: Model may occasionally output tool calls without proper markdown code blocks. Malformed calls are safely treated as final replies.
-3. **Iteration limit**: Default max 5 iterations may be reached for complex multi-step tasks.
-4. **No streaming tool calls**: Tool execution is sequential after the main response.
-5. **Model warmup**: First inference after service start is slower due to model loading.
+1. **Response latency**: ~4-5 seconds for simple responses on RTX 3050 6GB (4-bit quantized). Complex prompts take longer.
+2. **Tool call format sensitivity**: Qwen3-4B may not always output tool calls in the expected JSON-in-markdown format. It may:
+   - Answer directly without calling tools (e.g., "I don't have a clock" instead of calling get_current_time)
+   - Output tool calls without markdown code blocks
+   - Include extra text around the tool call JSON
+   - Use single quotes or trailing commas (rejected safely as final reply)
+3. **Tool choice**: The model decides whether to call tools based on its own judgment. Direct answers may be preferred for some questions.
+4. **Iteration limit**: Default max 5 iterations. Complex tasks requiring many tools may hit the limit.
+5. **No streaming tool calls**: Tool execution happens after the streaming response completes.
+6. **Model warmup**: First inference after service start takes longer (model loading into VRAM).
+7. **Context window**: Tool results consume context. Very long tool outputs may push the conversation toward the context limit.

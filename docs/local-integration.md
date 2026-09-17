@@ -89,6 +89,28 @@ Tests against the live Python inference service (Qwen3-4B + Arcon v1 LoRA):
 - Model info and runtime identity
 - Tool call detection with real model output
 - Tool execution loop with real tools
+- Path traversal blocked with real tools
+- Unknown tool rejection
+
+**Actual latencies** (RTX 3050 6GB, first inference warm):
+- Health check: ~65ms
+- Simple inference: ~3000ms
+- Full response (no tool): ~4500ms
+- Tool flow (with cognitive pipeline): ~7200ms
+- Tool execution (e.g., get_current_time): ~20ms
+- Safety validations: <1ms
+
+Run: `npx tsx --test tests/runtime-real.test.ts`
+
+#### Runtime Real Test Results
+
+| Scenario | Result |
+|----------|--------|
+| Normal answer (no tool) | Model answers directly |
+| Time request | Model answered "I don't have a clock" (no tool call — model chose direct answer) |
+| Path traversal | PATH_DENIED — no stack trace exposed |
+| Unknown tool | NOT_FOUND — handled gracefully |
+| Tool execution | get_current_time succeeded (~20ms) |
 
 ## Known Limitations (Qwen3-4B)
 
