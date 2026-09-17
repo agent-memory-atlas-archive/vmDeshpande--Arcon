@@ -5,6 +5,8 @@ export interface ValidationResult {
   errors: string[];
 }
 
+const MAX_STRING_LENGTH = 100_000;
+
 export function validateInput(schema: ToolInputSchema, input: Record<string, unknown>): ValidationResult {
   const errors: string[] = [];
 
@@ -24,6 +26,17 @@ export function validateInput(schema: ToolInputSchema, input: Record<string, unk
     if (!prop) {
       errors.push(`Unknown field: ${key}`);
       continue;
+    }
+
+    if (typeof value === "string") {
+      if (value.includes("\0")) {
+        errors.push(`Field ${key}: contains null bytes`);
+        continue;
+      }
+      if (value.length > MAX_STRING_LENGTH) {
+        errors.push(`Field ${key}: exceeds maximum length of ${MAX_STRING_LENGTH} characters`);
+        continue;
+      }
     }
 
     const typeCheck = typeof value;

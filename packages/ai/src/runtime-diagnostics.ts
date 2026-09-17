@@ -15,8 +15,19 @@ export interface RuntimeDiagnostics {
   lastToolLoopLatencyMs: number;
   lastResponseLatencyMs: number;
   totalToolCallsExecuted: number;
+  totalToolErrors: number;
+  totalValidationErrors: number;
+  totalTimeouts: number;
   capabilities: RuntimeCapabilities | null;
   timestamp: string;
+  toolStats?: ToolStats[];
+}
+
+export interface ToolStats {
+  name: string;
+  calls: number;
+  errors: number;
+  lastLatencyMs: number;
 }
 
 export interface DiagnosticOptions {
@@ -29,6 +40,11 @@ export interface DiagnosticOptions {
   lastToolLoopLatencyMs?: number;
   lastResponseLatencyMs?: number;
   totalToolCallsExecuted?: number;
+  totalToolErrors?: number;
+  totalValidationErrors?: number;
+  totalTimeouts?: number;
+  toolStats?: ToolStats[];
+  registeredTools?: Array<{ name: string; description: string; requiredArgs: string[] }>;
 }
 
 export async function getRuntimeDiagnostics(options: DiagnosticOptions): Promise<RuntimeDiagnostics> {
@@ -57,13 +73,14 @@ export async function getRuntimeDiagnostics(options: DiagnosticOptions): Promise
 
   let capabilities: RuntimeCapabilities | null = options.runtimeCapabilities ?? null;
 
-  const registeredTools = registry
-    ? registry.list().map((tool) => ({
-        name: tool.name,
-        description: tool.description,
-        requiredArgs: tool.inputSchema.required ?? [],
-      }))
-    : [];
+  const registeredTools = options.registeredTools
+    ?? (registry
+      ? registry.list().map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+          requiredArgs: tool.inputSchema.required ?? [],
+        }))
+      : []);
 
   return {
     registeredTools,
@@ -75,8 +92,12 @@ export async function getRuntimeDiagnostics(options: DiagnosticOptions): Promise
     lastToolLoopLatencyMs: options.lastToolLoopLatencyMs ?? 0,
     lastResponseLatencyMs: options.lastResponseLatencyMs ?? 0,
     totalToolCallsExecuted: options.totalToolCallsExecuted ?? 0,
+    totalToolErrors: options.totalToolErrors ?? 0,
+    totalValidationErrors: options.totalValidationErrors ?? 0,
+    totalTimeouts: options.totalTimeouts ?? 0,
     capabilities,
     timestamp: new Date().toISOString(),
+    toolStats: options.toolStats,
   };
 }
 
@@ -98,11 +119,18 @@ export function formatDiagnostics(diagnostics: RuntimeDiagnostics): string {
         ].join("\n")
       : "  Not available",
     "",
-    `Tool Loop Stats: iterations=${diagnostics.lastToolLoopIterations} latency=${diagnostics.lastToolLoopLatencyMs}ms totalCalls=${diagnostics.totalToolCallsExecuted}`,
+    `Tool Loop Stats: iterations=${diagnostics.lastToolLoopIterations} latency=${diagnostics.lastToolLoopLatencyMs}ms totalCalls=${diagnostics.totalToolCallsExecuted} errors=${diagnostics.totalToolErrors} validationErrors=${diagnostics.totalValidationErrors} timeouts=${diagnostics.totalTimeouts}`,
     `Response Latency: ${diagnostics.lastResponseLatencyMs}ms`,
     "",
     `Registered Tools (${diagnostics.registeredTools.length}):`,
   ];
+
+  if (diagnostics.toolStats && diagnostics.toolStats.length > 0) {
+    lines.push("", "Tool Statistics:");
+    for (const stat of diagnostics.toolStats) {
+      lines.push(`  - ${stat.name}: calls=${stat.calls} errors=${stat.errors} lastLatency=${stat.lastLatencyMs}ms`);
+    }
+  }
 
   for (const tool of diagnostics.registeredTools) {
     const args = tool.requiredArgs.length > 0 ? ` [${tool.requiredArgs.join(", ")}]` : "";

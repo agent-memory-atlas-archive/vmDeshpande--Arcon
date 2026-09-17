@@ -17,6 +17,8 @@ export interface ToolLoopResult {
   toolResults: ToolResult[];
   toolCallsMade: number;
   iterationLimitReached: boolean;
+  toolErrors: number;
+  toolTimeouts: number;
 }
 
 export interface ToolLoopOptions {
@@ -27,6 +29,8 @@ export interface ToolLoopOptions {
   initialMessages?: { role: string; content: string }[];
   signal?: AbortSignal;
   logger?: Logger;
+  iterationDelayMs?: number;
+  maxInputLength?: number;
 }
 
 export interface ToolExecutorLike {
@@ -38,21 +42,115 @@ export interface ToolRegistryLike {
   list(): Tool[];
 }
 
-const TOOL_CALL_PATTERN = /```(?:json)?\s*\n?\s*(\{[\s\S]*?\})\s*\n?```/;
+function extractJsonFromResponse(response: string): string | null {
+  const codeBlockPatterns = [
+    /```(?:json)?\s*\n?([\s\S]*?)\s*```/g,
+    /```\s*\n?([\s\S]*?)\s*```/g,
+  ];
+
+  for (const pattern of codeBlockPatterns) {
+    let match;
+    pattern.lastIndex = 0;
+    while ((match = pattern.exec(response)) !== null) {
+      const candidate = match[1].trim();
+      const extracted = tryExtractJsonFromText(candidate);
+      if (extracted !== null) {
+        const parsed = safeParseJson(extracted);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && hasToolField(parsed)) {
+          return extracted;
+        }
+      }
+    }
+  }
+
+  return tryExtractJsonFromText(response.trim());
+}
+
+function hasToolField(obj: object): boolean {
+  const record = obj as Record<string, unknown>;
+  return record.tool !== undefined || record.toolName !== undefined;
+}
+
+function safeParseJson(json: string): unknown {
+  try {
+    return JSON.parse(json);
+  } catch {
+    return undefined;
+  }
+}
+
+function tryExtractJsonFromText(text: string): string | null {
+  const firstOpen = text.indexOf("{");
+  if (firstOpen === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escapeNext = false;
+
+  for (let i = firstOpen; i < text.length; i++) {
+    const ch = text[i];
+
+    if (escapeNext) {
+      escapeNext = false;
+      continue;
+    }
+
+    if (ch === "\\" && inString) {
+      escapeNext = true;
+      continue;
+    }
+
+    if (ch === '"' && !escapeNext) {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) continue;
+
+    if (ch === "{") {
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        const candidate = text.slice(firstOpen, i + 1);
+        try {
+          JSON.parse(candidate);
+          return candidate;
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+
+  return null;
+}
 
 export function parseToolCall(response: string): ToolCallParseResult {
-  const match = response.match(TOOL_CALL_PATTERN);
+  const jsonStr = extractJsonFromResponse(response);
 
-  if (!match) {
+  if (!jsonStr) {
     return { finalReply: response.trim() };
   }
 
-  let parsed: { tool?: string; arguments?: Record<string, unknown>; toolName?: string };
+  let parsed: { tool?: string; toolName?: string; arguments?: Record<string, unknown> };
 
   try {
-    parsed = JSON.parse(match[1]);
+    parsed = JSON.parse(jsonStr);
   } catch {
     return { finalReply: response.trim() };
+  }
+
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    if (parsed.tool !== undefined && typeof parsed.tool !== "string") {
+      return { finalReply: response.trim() };
+    }
+    if (parsed.toolName !== undefined && typeof parsed.toolName !== "string") {
+      return { finalReply: response.trim() };
+    }
+    if (parsed.arguments !== undefined && (typeof parsed.arguments !== "object" || Array.isArray(parsed.arguments))) {
+      return { finalReply: response.trim() };
+    }
   }
 
   const toolName = parsed.tool ?? parsed.toolName;
@@ -85,13 +183,15 @@ export function describeAllTools(tools: Tool[]): string {
 }
 
 export async function executeToolLoop(options: ToolLoopOptions): Promise<ToolLoopResult> {
-  const { getModelResponse, executor, registry, maxIterations, initialMessages, signal, logger } = options;
+  const { getModelResponse, executor, registry, maxIterations, initialMessages, signal, logger, iterationDelayMs = 0, maxInputLength = 500_000 } = options;
   const log = logger ?? createLogger(false);
 
   let finalReply = "";
   const toolResults: ToolResult[] = [];
   let toolCallsMade = 0;
   let iterationLimitReached = false;
+  let toolErrors = 0;
+  let toolTimeouts = 0;
 
   const messages: Array<{ role: string; content: string }> = initialMessages ?? [];
 
@@ -102,7 +202,17 @@ export async function executeToolLoop(options: ToolLoopOptions): Promise<ToolLoo
       break;
     }
 
+    if (iterationDelayMs > 0 && i > 0) {
+      await new Promise((resolve) => setTimeout(resolve, iterationDelayMs));
+    }
+
     const response = await getModelResponse(messages);
+
+    if (response.length > maxInputLength) {
+      log.warn(`Tool loop: response exceeds max input length (${response.length} > ${maxInputLength}), treating as final reply`);
+      finalReply = response.slice(0, maxInputLength);
+      break;
+    }
 
     const parseResult = parseToolCall(response);
 
@@ -120,6 +230,12 @@ export async function executeToolLoop(options: ToolLoopOptions): Promise<ToolLoo
       messages.push({ role: "assistant", content: response.trim() });
       messages.push({ role: "tool", content: formatToolResultForMessage(validation) });
       toolCallsMade++;
+      if (!validation.success) {
+        toolErrors++;
+        if (validation.code === "TIMEOUT") {
+          toolTimeouts++;
+        }
+      }
       continue;
     }
 
@@ -130,6 +246,12 @@ export async function executeToolLoop(options: ToolLoopOptions): Promise<ToolLoo
     messages.push({ role: "assistant", content: response.trim() });
     messages.push({ role: "tool", content: formatToolResultForMessage(result) });
     toolCallsMade++;
+    if (!result.success) {
+      toolErrors++;
+      if (result.status === "timeout") {
+        toolTimeouts++;
+      }
+    }
   }
 
   if (toolCallsMade >= maxIterations && !finalReply) {
@@ -137,7 +259,7 @@ export async function executeToolLoop(options: ToolLoopOptions): Promise<ToolLoo
     finalReply = `I've reached the maximum number of tool calls (${maxIterations}). Let me provide my best answer based on what I've gathered.`;
   }
 
-  return { finalReply, toolResults, toolCallsMade, iterationLimitReached };
+  return { finalReply, toolResults, toolCallsMade, iterationLimitReached, toolErrors, toolTimeouts };
 }
 
 function validateToolCall(
@@ -194,6 +316,17 @@ function validateInputForTool(tool: { inputSchema: { type: string; properties?: 
     if (!prop) {
       errors.push(`Unknown field: ${key}`);
       continue;
+    }
+
+    if (typeof value === "string") {
+      if (value.includes("\0")) {
+        errors.push(`Field ${key}: contains null bytes`);
+        continue;
+      }
+      if (value.length > 100_000) {
+        errors.push(`Field ${key}: exceeds maximum length of 100000 characters`);
+        continue;
+      }
     }
 
     const typeCheck = typeof value;

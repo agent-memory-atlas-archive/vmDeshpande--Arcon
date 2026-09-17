@@ -53,6 +53,14 @@ export function isBlockedFile(filePath: string): { blocked: true; reason: string
     if (lowerName.startsWith(lowerPattern + ".")) {
       return { blocked: true, reason: `Blocked sensitive file pattern: ${fileName}` };
     }
+    if (lowerPattern.startsWith(".")) {
+      if (lowerName.endsWith(lowerPattern) && lowerName.length > lowerPattern.length) {
+        return { blocked: true, reason: `Blocked sensitive file: ${fileName}` };
+      }
+      if (lowerName === lowerPattern.slice(1)) {
+        return { blocked: true, reason: `Blocked sensitive file: ${fileName}` };
+      }
+    }
   }
 
   if (lowerName.startsWith(".") && lowerName !== ".git" && lowerName !== ".vscode") {

@@ -18,7 +18,8 @@ Here is what I need:
 ```
 
 4. A JSON code block without the `json` language tag is also accepted.
-5. If no tool-call block is found, the response is treated as a final answer.
+5. Plain JSON (no markdown code block) is also accepted as a fallback.
+6. If no tool-call block is found, the response is treated as a final answer.
 
 ## Tool-Call Format
 
@@ -62,8 +63,21 @@ user message → model decision → tool execution → tool result → model con
 |-------|---------|--------------------------------------|
 | `maxToolIterations` | 5 | Prevents infinite tool loops           |
 | `defaultTimeoutMs` (ToolExecutor) | 5000ms | Prevents hanging on slow tools |
+| `iterationDelayMs` (executeToolLoop) | 0ms | Delay between tool-call iterations (prevents rapid model hammering) |
+| `maxInputLength` (executeToolLoop) | 500000 chars | Truncates overly long model responses to prevent OOM |
 
 When the iteration limit is reached, the model's response becomes the final answer and no further tool calls are made.
+
+## Error Tracking
+
+The `ToolLoopResult` tracks error statistics:
+
+| Field | Description                                    |
+|-------|------------------------------------------------|
+| `toolErrors` | Number of tool results with `success: false` |
+| `toolTimeouts` | Number of tool results with status `timeout` |
+
+These are surfaced via runtime diagnostics for monitoring.
 
 ## Failure Handling
 

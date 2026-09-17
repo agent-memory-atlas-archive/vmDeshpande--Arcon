@@ -7,6 +7,14 @@ export interface SafePathResult {
 }
 
 export function resolveSafePath(inputPath: string, allowedRoots: string[]): SafePathResult {
+  if (!inputPath || typeof inputPath !== "string") {
+    return { safe: false, reason: "Path is required" };
+  }
+
+  if (inputPath.includes("\0")) {
+    return { safe: false, reason: "Path contains null bytes" };
+  }
+
   const normalized = normalize(inputPath);
   const absolute = resolve(normalized);
 

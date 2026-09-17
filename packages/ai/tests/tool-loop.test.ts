@@ -153,6 +153,108 @@ describe("parseToolCall", () => {
   });
 });
 
+describe("parseToolCall - plain JSON fallback", () => {
+  it("parses a tool call from plain JSON without code block", () => {
+    const response = '{"tool": "get_time", "arguments": {}}';
+    const result = parseToolCall(response);
+
+    assert.ok(result.toolCall);
+    assert.strictEqual(result.toolCall!.toolName, "get_time");
+    assert.strictEqual(result.finalReply, undefined);
+  });
+
+  it("parses a tool call from JSON with toolName field", () => {
+    const response = '{"toolName": "get_time", "arguments": {"tz": "utc"}}';
+    const result = parseToolCall(response);
+
+    assert.ok(result.toolCall);
+    assert.strictEqual(result.toolCall!.toolName, "get_time");
+    assert.deepStrictEqual(result.toolCall!.arguments, { tz: "utc" });
+  });
+
+  it("handles JSON with nested braces in string values", () => {
+    const response = '{"tool": "read_file", "arguments": {"path": "file {not a brace}.txt"}}';
+    const result = parseToolCall(response);
+
+    assert.ok(result.toolCall);
+    assert.strictEqual(result.toolCall!.toolName, "read_file");
+    assert.strictEqual(result.toolCall!.arguments.path, "file {not a brace}.txt");
+  });
+
+  it("handles response with text before code block", () => {
+    const response = "I'll check that for you.\n```json\n{\"tool\": \"get_current_time\", \"arguments\": {}}\n```";
+    const result = parseToolCall(response);
+
+    assert.ok(result.toolCall);
+    assert.strictEqual(result.toolCall!.toolName, "get_current_time");
+  });
+
+  it("handles response with text after code block", () => {
+    const response = '```json\n{"tool": "get_current_time", "arguments": {}}\n```\nHere is the result.';
+    const result = parseToolCall(response);
+
+    assert.ok(result.toolCall);
+    assert.strictEqual(result.toolCall!.toolName, "get_current_time");
+  });
+
+  it("handles multiple code blocks by finding first valid tool JSON", () => {
+    const response = 'Some text\n```json\n{"action": "skip"}\n```\n```json\n{"tool": "get_time", "arguments": {}}\n```\nMore text';
+    const result = parseToolCall(response);
+
+    assert.ok(result.toolCall);
+    assert.strictEqual(result.toolCall!.toolName, "get_time");
+  });
+
+  it("returns final reply for JSON without tool/toolName field", () => {
+    const response = '{"action": "do_something", "arguments": {}}';
+    const result = parseToolCall(response);
+
+    assert.ok(result.finalReply);
+    assert.strictEqual(result.toolCall, undefined);
+  });
+
+  it("returns final reply for tool call with non-string tool name", () => {
+    const response = '{"tool": 123, "arguments": {}}';
+    const result = parseToolCall(response);
+
+    assert.ok(result.finalReply);
+    assert.strictEqual(result.toolCall, undefined);
+  });
+
+  it("returns final reply for null tool name", () => {
+    const response = '{"tool": null, "arguments": {}}';
+    const result = parseToolCall(response);
+
+    assert.ok(result.finalReply);
+    assert.strictEqual(result.toolCall, undefined);
+  });
+
+  it("handles unicode in response", () => {
+    const response = "こんにちは\n```json\n{\"tool\": \"get_time\", \"arguments\": {}}\n```";
+    const result = parseToolCall(response);
+
+    assert.ok(result.toolCall);
+    assert.strictEqual(result.toolCall!.toolName, "get_time");
+  });
+});
+
+describe("parseToolCall - edge cases", () => {
+  it("handles response with only whitespace", () => {
+    const result = parseToolCall("   \n  \t  ");
+    assert.ok(result.finalReply !== undefined);
+  });
+
+  it("handles very long plain JSON", () => {
+    const bigArgs = { data: "x".repeat(1000) };
+    const response = JSON.stringify({ tool: "get_time", arguments: bigArgs });
+    const result = parseToolCall(response);
+
+    assert.ok(result.toolCall);
+    assert.strictEqual(result.toolCall!.toolName, "get_time");
+    assert.strictEqual(result.toolCall!.arguments.data.length, 1000);
+  });
+});
+
 describe("executeToolLoop - no tool needed", () => {
   it("returns model response as final reply when no tool call is detected", async () => {
     const { getModelResponse, executor, registry, maxIterations } = createLoopInput(
@@ -328,6 +430,123 @@ describe("executeToolLoop - cancellation", () => {
 
     assert.strictEqual(result.toolResults[0].status, "cancelled");
     assert.strictEqual(result.toolResults[0].code, "CANCELLED");
+  });
+});
+
+describe("executeToolLoop - validation null bytes in input", () => {
+  it("rejects null bytes in tool arguments", async () => {
+    const registry = new ToolRegistry();
+    registry.register(makeTool("get_time"));
+    const executor = new ToolExecutor(registry, { logEnabled: false });
+
+    const result = await executeToolLoop({
+      getModelResponse: async (_messages) => '```json\n{"tool": "get_time", "arguments": {"tz": "utc\\u0000malicious"}}\n```',
+      executor,
+      registry,
+      maxIterations: 3,
+    });
+
+    assert.strictEqual(result.toolResults[0].success, false);
+    assert.strictEqual(result.toolResults[0].code, "VALIDATION_ERROR");
+  });
+});
+
+describe("executeToolLoop - error tracking", () => {
+  it("tracks toolErrors when tool returns error status", async () => {
+    const registry = new ToolRegistry();
+    registry.register(makeToolWithResult("fail_tool", { success: false, toolName: "fail_tool", status: "error", error: "fail", code: "EXECUTION_ERROR", durationMs: 5 }));
+    const executor = new ToolExecutor(registry, { logEnabled: false });
+
+    const result = await executeToolLoop({
+      getModelResponse: async (_messages) => '```json\n{"tool": "fail_tool", "arguments": {}}\n```',
+      executor,
+      registry,
+      maxIterations: 3,
+    });
+
+    assert.strictEqual(result.toolCallsMade, 3);
+    assert.strictEqual(result.toolErrors, 3);
+    assert.strictEqual(result.toolTimeouts, 0);
+  });
+
+  it("tracks toolTimeouts", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "slow_tool",
+      description: "Slow",
+      inputSchema: { type: "object", properties: {} },
+      async execute() {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        return { success: true, toolName: "slow_tool", status: "success", durationMs: 200 };
+      },
+    });
+    const executor = new ToolExecutor(registry, { defaultTimeoutMs: 50, logEnabled: false });
+
+    const result = await executeToolLoop({
+      getModelResponse: async (_messages) => '```json\n{"tool": "slow_tool", "arguments": {}}\n```',
+      executor,
+      registry,
+      maxIterations: 3,
+    });
+
+    assert.strictEqual(result.toolTimeouts, 3);
+    assert.strictEqual(result.toolErrors, 3);
+  });
+
+  it("has zero errors for fully successful loop", async () => {
+    const registry = new ToolRegistry();
+    registry.register(makeTool("get_time"));
+    const executor = new ToolExecutor(registry, { logEnabled: false });
+
+    const result = await executeToolLoop({
+      getModelResponse: async (_messages) => '```json\n{"tool": "get_time", "arguments": {}}\n```',
+      executor,
+      registry,
+      maxIterations: 3,
+    });
+
+    assert.strictEqual(result.toolErrors, 0);
+    assert.strictEqual(result.toolTimeouts, 0);
+  });
+});
+
+describe("executeToolLoop - iteration delay", () => {
+  it("applies delay between iterations when configured", async () => {
+    const registry = new ToolRegistry();
+    registry.register(makeTool("get_time"));
+    const executor = new ToolExecutor(registry, { logEnabled: false });
+
+    const start = Date.now();
+    await executeToolLoop({
+      getModelResponse: async (_messages) => '```json\n{"tool": "get_time", "arguments": {}}\n```',
+      executor,
+      registry,
+      maxIterations: 3,
+      iterationDelayMs: 100,
+    });
+    const elapsed = Date.now() - start;
+
+    assert.ok(elapsed >= 200, `Expected at least 200ms delay (2 gaps x 100ms), got ${elapsed}ms`);
+  });
+});
+
+describe("executeToolLoop - maxInputLength", () => {
+  it("truncates overly long model responses", async () => {
+    const registry = new ToolRegistry();
+    registry.register(makeTool("get_time"));
+    const executor = new ToolExecutor(registry, { logEnabled: false });
+    const longResponse = "x".repeat(600_000);
+
+    const result = await executeToolLoop({
+      getModelResponse: async (_messages) => longResponse,
+      executor,
+      registry,
+      maxIterations: 3,
+      maxInputLength: 500_000,
+    });
+
+    assert.ok(result.finalReply.length <= 500_000);
+    assert.strictEqual(result.toolCallsMade, 0);
   });
 });
 
