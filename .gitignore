@@ -87,3 +87,24 @@ data/
 # Test databases
 tests/*.sqlite
 packages/*/tests/*.sqlite
+
+# TypeScript compiler output generated beside source files
+apps/**/src/**/*.js
+apps/**/src/**/*.js.map
+apps/**/src/**/*.d.ts
+apps/**/src/**/*.d.ts.map
+
+packages/**/src/**/*.js
+packages/**/src/**/*.js.map
+packages/**/src/**/*.d.ts
+packages/**/src/**/*.d.ts.map
+
+apps/**/tests/**/*.js
+apps/**/tests/**/*.js.map
+apps/**/tests/**/*.d.ts
+apps/**/tests/**/*.d.ts.map
+
+packages/**/tests/**/*.js
+packages/**/tests/**/*.js.map
+packages/**/tests/**/*.d.ts
+packages/**/tests/**/*.d.ts.map

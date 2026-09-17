@@ -61,6 +61,8 @@ class ChatCompletionRequest(BaseModel):
     max_tokens: Optional[int] = None
     temperature: Optional[float] = None
     top_p: Optional[float] = None
+    tools: Optional[list[dict]] = None
+    tool_choice: Optional[str] = None
 
 
 class ChatCompletionChoice(BaseModel):
@@ -230,6 +232,19 @@ async def chat_completions(request: ChatCompletionRequest):
     max_new_tokens = request.max_tokens or MAX_NEW_TOKENS
     temperature = request.temperature if request.temperature is not None else TEMPERATURE
     top_p = request.top_p if request.top_p is not None else TOP_P
+
+    tool_definitions = None
+    if request.tools:
+        tool_definitions = request.tools
+        tools_system = "Available tools:\n" + json.dumps(tool_definitions, indent=2)
+        tools_instruction = "When you want to call a tool, output EXACTLY this JSON format and nothing else: {\"tool\": \"tool_name\", \"arguments\": {\"param\": \"value\"}}. Do not include markdown formatting, do not include extra text."
+        messages.insert(0, {"role": "system", "content": f"{tools_system}\n\n{tools_instruction}"})
+
+    if request.tool_choice:
+        logger.info("tool_choice: %s", request.tool_choice)
+
+    logger.info("tools: %d", len(tool_definitions) if tool_definitions else 0)
+    logger.info("messages: %d", len(messages))
 
     model_id = f"arcon-{ADAPTER_NAME or 'base'}"
 

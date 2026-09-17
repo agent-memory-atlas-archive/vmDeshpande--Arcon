@@ -16,6 +16,7 @@ export interface ChatRequest {
 export interface ChatResponse {
   reply: string;
   conversationId: string;
+  toolResults?: Array<{ toolName: string; status: string; code?: string; durationMs: number }>;
 }
 
 export interface Logger {
@@ -33,6 +34,7 @@ export interface ConversationMemory {
 
 export interface AiClient {
   generateReply(messages: ChatMessage[]): Promise<string>;
+  generateReply(messages: ChatMessage[], tools?: Array<{ name: string; description: string }>): Promise<string>;
   generateReplyStream?(messages: ChatMessage[]): AsyncIterable<string>;
 }
 

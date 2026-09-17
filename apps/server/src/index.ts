@@ -65,7 +65,7 @@ const runtimeCapabilities = buildRuntimeCapabilities({
   hasComputerControl: false,
   hasBackgroundProcessing: false,
   hasVectorSearch: false,
-  hasToolCalling: false,
+  hasToolCalling: true,
   hasStreaming: runtimeIdentity.inferenceBackend === "arcon-lora",
 });
 

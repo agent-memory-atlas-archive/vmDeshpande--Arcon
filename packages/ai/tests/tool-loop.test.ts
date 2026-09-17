@@ -90,6 +90,45 @@ describe("parseToolCall", () => {
     assert.strictEqual(result.toolCall!.arguments.query, "test");
   });
 
+  it("accepts tool_name as field name", () => {
+    const response = '```json\n{"tool_name": "get_time", "arguments": {}}\n```';
+    const result = parseToolCall(response);
+
+    assert.ok(result.toolCall);
+    assert.strictEqual(result.toolCall!.toolName, "get_time");
+  });
+
+  it("accepts function_call wrapper", () => {
+    const response = '```json\n{"function_call": {"name": "get_time", "arguments": {}}}\n```';
+    const result = parseToolCall(response);
+
+    assert.ok(result.toolCall);
+    assert.strictEqual(result.toolCall!.toolName, "get_time");
+    assert.deepStrictEqual(result.toolCall!.arguments, {});
+  });
+
+  it("handles null bytes in JSON by stripping them", () => {
+    const response = '```json\n{"tool": "get_time", "arguments": {"tz": "utc\0malicious"}}\n```';
+    const result = parseToolCall(response);
+
+    assert.ok(result.toolCall);
+    assert.strictEqual(result.toolCall!.toolName, "get_time");
+  });
+
+  it("trims whitespace from tool names", () => {
+    const response = '```json\n{"tool": "get_time ", "arguments": {}}\n```';
+    const result = parseToolCall(response);
+
+    assert.ok(result.toolCall);
+    assert.strictEqual(result.toolCall!.toolName, "get_time");
+  });
+
+  it("handles empty string response", () => {
+    const result = parseToolCall("");
+
+    assert.strictEqual(result.finalReply, "");
+  });
+
   it("accepts toolName as field name", () => {
     const response = '```json\n{"toolName": "get_time", "arguments": {}}\n```';
     const result = parseToolCall(response);
@@ -321,6 +360,61 @@ describe("executeToolLoop - multiple sequential tool calls", () => {
     assert.strictEqual(result.toolResults.length, 2);
     assert.strictEqual(result.toolResults[0].toolName, "get_current_time");
     assert.strictEqual(result.toolResults[1].toolName, "get_runtime_info");
+  });
+});
+
+describe("executeToolLoop - case-insensitive tool matching", () => {
+  it("executes tool when model returns different casing", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "get_current_time",
+      description: "Get time",
+      inputSchema: { type: "object", properties: {} },
+      async execute() {
+        return { success: true, toolName: "get_current_time", status: "success", output: { time: "12:00" }, durationMs: 5 };
+      },
+    });
+    const executor = new ToolExecutor(registry, { logEnabled: false });
+    let callCount = 0;
+
+    const result = await executeToolLoop({
+      getModelResponse: async (_messages) => {
+        callCount++;
+        if (callCount === 1) return '```json\n{"tool": "GET_CURRENT_TIME", "arguments": {}}\n```';
+        return "The time is 12:00.";
+      },
+      executor,
+      registry,
+      maxIterations: 3,
+    });
+
+    assert.strictEqual(result.toolCallsMade, 1);
+    assert.strictEqual(result.toolResults[0].success, true);
+    assert.strictEqual(result.toolResults[0].toolName, "get_current_time");
+    assert.ok(result.finalReply.includes("12:00"));
+  });
+
+  it("handles unknown tool with different casing than registered", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "get_current_time",
+      description: "Get time",
+      inputSchema: { type: "object", properties: {} },
+      async execute() {
+        return { success: true, toolName: "get_current_time", status: "success", output: {}, durationMs: 5 };
+      },
+    });
+    const executor = new ToolExecutor(registry, { logEnabled: false });
+
+    const result = await executeToolLoop({
+      getModelResponse: async (_messages) => '```json\n{"tool": "GET_RUNTIME_INFO", "arguments": {}}\n```',
+      executor,
+      registry,
+      maxIterations: 3,
+    });
+
+    assert.strictEqual(result.toolResults[0].success, false);
+    assert.strictEqual(result.toolResults[0].code, "NOT_FOUND");
   });
 });
 

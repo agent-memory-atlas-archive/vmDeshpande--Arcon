@@ -1,5 +1,6 @@
 import type { AiClient, ChatMessage } from "@arcon/shared";
 import type { RuntimeIdentity } from "../runtime-identity.js";
+import { createLogger } from "../tools/tool-logger.js";
 
 export interface ArconLoRAProviderOptions {
   baseUrl: string;
@@ -29,11 +30,49 @@ interface LoRAModelInfoResponse {
   loaded_at: string;
 }
 
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  inputSchema?: Record<string, unknown>;
+}
+
+interface ToolCallFunction {
+  name?: string;
+  arguments?: string;
+}
+
+interface ToolCallItem {
+  function?: ToolCallFunction;
+}
+
+interface ChatCompletionChoice {
+  message?: {
+    role?: string;
+    content?: string;
+    tool_calls?: ToolCallItem[];
+  };
+  finish_reason?: string;
+}
+
+interface ChatCompletionResponse {
+  choices: ChatCompletionChoice[];
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+}
+
+interface StreamDelta {
+  content?: string;
+}
+
+interface StreamChunk {
+  choices?: Array<{ delta?: StreamDelta }>;
+}
+
 export class ArconLoRAProvider implements AiClient {
   private readonly baseUrl: string;
   private readonly model: string;
   private readonly timeoutMs: number;
   private modelInfo: LoRAModelInfoResponse | null = null;
+  private readonly logger = createLogger(false);
 
   constructor(private readonly options: ArconLoRAProviderOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
@@ -41,7 +80,29 @@ export class ArconLoRAProvider implements AiClient {
     this.timeoutMs = options.timeoutMs ?? 120_000;
   }
 
-  async generateReply(messages: ChatMessage[]): Promise<string> {
+  async generateReply(messages: ChatMessage[]): Promise<string>;
+  async generateReply(messages: ChatMessage[], tools?: ToolDefinition[]): Promise<string>;
+  async generateReply(messages: ChatMessage[], tools?: ToolDefinition[]): Promise<string> {
+    const toolChoice = tools && tools.length > 0 ? "required" : undefined;
+    const toolSchemas = tools
+      ? tools.map((t) => ({
+          type: "function" as const,
+          function: {
+            name: t.name,
+            description: t.description,
+            parameters: t.inputSchema ?? { type: "object", properties: {} },
+          },
+        }))
+      : undefined;
+
+    this.logger.info("ArconLoRAProvider.generateReply", {
+      model: this.model,
+      messageCount: messages.length,
+      toolCount: tools?.length ?? 0,
+      toolChoice,
+      toolNames: tools?.map((t) => t.name) ?? [],
+    });
+
     const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -52,6 +113,8 @@ export class ArconLoRAProvider implements AiClient {
           content: message.content,
         })),
         stream: false,
+        ...(toolSchemas ? { tools: toolSchemas } : {}),
+        ...(toolChoice ? { tool_choice: toolChoice } : {}),
       }),
       signal: AbortSignal.timeout(this.timeoutMs),
     });
@@ -61,15 +124,31 @@ export class ArconLoRAProvider implements AiClient {
       throw new Error(`Arcon LoRA inference failed (${response.status}): ${text}`);
     }
 
-    const data = (await response.json()) as {
-      choices: Array<{
-        message?: { role?: string; content?: string };
-        finish_reason?: string;
-      }>;
-      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
-    };
+    const data = (await response.json()) as ChatCompletionResponse;
 
-    const reply = data.choices?.[0]?.message?.content?.trim();
+    const message = data.choices?.[0]?.message;
+    const toolCalls = message?.tool_calls;
+    const content = message?.content?.trim();
+    const finishReason = data.choices?.[0]?.finish_reason;
+
+    this.logger.info("ArconLoRAProvider.generateReply response", {
+      finishReason,
+      hasToolCalls: toolCalls && toolCalls.length > 0,
+      toolCallCount: toolCalls?.length ?? 0,
+      contentPreview: content ? content.slice(0, 500) : undefined,
+    });
+
+    if (toolCalls && toolCalls.length > 0) {
+      const toolCall = toolCalls[0];
+      const toolName = toolCall.function?.name;
+      const toolArgs = toolCall.function?.arguments;
+      this.logger.info("ArconLoRAProvider tool call detected", { toolName, toolArgs });
+      if (toolName) {
+        return JSON.stringify({ tool: toolName, arguments: toolArgs ? JSON.parse(toolArgs) : {} });
+      }
+    }
+
+    const reply = content ?? "";
     if (!reply) {
       throw new Error("Arcon LoRA inference returned an empty response");
     }
@@ -121,7 +200,7 @@ export class ArconLoRAProvider implements AiClient {
               return;
             }
 
-            let chunk: { choices?: Array<{ delta?: { content?: string } }> };
+            let chunk: StreamChunk;
             try {
               chunk = JSON.parse(payload);
             } catch {

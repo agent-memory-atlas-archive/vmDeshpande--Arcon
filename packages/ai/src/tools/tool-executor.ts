@@ -30,8 +30,15 @@ export class ToolExecutor {
     return this.registry.list();
   }
 
+  private findTool(name: string): Tool | undefined {
+    const exact = this.registry.get(name);
+    if (exact) return exact;
+    const lower = name.toLowerCase();
+    return this.registry.list().find((t) => t.name.toLowerCase() === lower);
+  }
+
   async execute(toolName: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
-    const tool = this.registry.get(toolName);
+    const tool = this.findTool(toolName);
 
     if (!tool) {
       return {

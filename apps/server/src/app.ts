@@ -10,7 +10,7 @@ import {
   type ChatResponse,
   type ConversationMemory
 } from "@arcon/shared";
-import { ChatService, type ChatServiceOptions, type RuntimeIdentity, type RuntimeCapabilities } from "@arcon/ai";
+import { ChatService, type ChatServiceOptions, type RuntimeIdentity, type RuntimeCapabilities, ToolRegistry, ToolExecutor, createGetCurrentTimeTool, createGetSystemStatusTool, createListDirectoryTool, createReadFileTool, createSearchFilesTool, type ToolResult } from "@arcon/ai";
 import { MemoryRepository, MemoryPipeline } from "@arcon/memory";
 
 export interface CreateAppOptions {
@@ -26,6 +26,7 @@ export interface CreateAppOptions {
   runtimeCapabilities: RuntimeCapabilities;
   chatServiceOptions?: ChatServiceOptions;
   memoryDatabasePath?: string;
+  allowedRoot?: string;
 }
 
 export function createApp(options: CreateAppOptions) {
@@ -85,6 +86,17 @@ export function createApp(options: CreateAppOptions) {
   );
   const pipeline = new MemoryPipeline(repository);
 
+  const allowedRoot = options.allowedRoot ?? dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+
+  const toolRegistry = new ToolRegistry();
+  toolRegistry.register(createGetCurrentTimeTool({}));
+  toolRegistry.register(createGetSystemStatusTool({}));
+  toolRegistry.register(createListDirectoryTool({ allowedRoots: [allowedRoot] }));
+  toolRegistry.register(createReadFileTool({ allowedRoots: [allowedRoot] }));
+  toolRegistry.register(createSearchFilesTool({ allowedRoots: [allowedRoot] }));
+
+  const toolExecutor = new ToolExecutor(toolRegistry, { logEnabled: false });
+
   const chatServices = new Map<string, ChatService>();
 
    function getChatService(conversationId: string): ChatService {
@@ -95,6 +107,8 @@ export function createApp(options: CreateAppOptions) {
         runtimeIdentity: options.runtimeIdentity,
         runtimeCapabilities: options.runtimeCapabilities,
         hasStreaming: true,
+        toolExecutor,
+        maxToolIterations: 5,
       };
 
       service = new ChatService(
@@ -125,6 +139,12 @@ export function createApp(options: CreateAppOptions) {
       response.json({
         reply: result.reply,
         conversationId,
+        toolResults: result.toolResults.map((tr: ToolResult) => ({
+          toolName: tr.toolName,
+          status: tr.status,
+          code: tr.code,
+          durationMs: tr.durationMs,
+        })),
       });
     } catch (error) {
       const normalizedError = error instanceof Error ? error : new Error(String(error));

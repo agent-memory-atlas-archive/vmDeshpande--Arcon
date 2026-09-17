@@ -34,17 +34,22 @@ import { LlmMemoryExtractor } from "./semantic-memory/index.js";
 import { ConversationContext } from "./conversation-context.js";
 import { CognitiveAdapter, CognitiveInput, CognitiveDecision } from "./cognitive-adapter.js";
 import { stripThinkTokens } from "./utils/strip-think-tokens.js";
+import { createLogger } from "./tools/tool-logger.js";
 import type { RuntimeState } from "./runtime-state.js";
 import type { RuntimeIdentity } from "./runtime-identity.js";
 import type { RuntimeCapabilities } from "./runtime-capabilities.js";
 import { buildRuntimeCapabilities } from "./runtime-state.js";
 import { CapabilityRecall, createCapabilityRecall } from "./capability-recall.js";
-import { ToolExecutor, type ToolResult, type ToolLoopOptions, executeToolLoop, describeAllTools } from "./tools/index.js";
+import {
+  ToolExecutor, type ToolResult, type ToolLoopOptions, executeToolLoop, describeAllTools,
+} from "./tools/index.js";
+import type { ToolDefinition } from "./inference/arcon-lora-provider.js";
 
 export interface ChatResult {
   prompt: string;
   reply: string;
   pendingConfirmations: Memory[];
+  toolResults: ToolResult[];
 }
 
 export interface ChatServiceOptions {
@@ -81,6 +86,7 @@ export class ChatService {
   private readonly capabilityRecall: CapabilityRecall;
   public readonly toolExecutor?: ToolExecutor;
   private readonly maxToolIterations: number;
+  private readonly logger = createLogger(true);
 
   constructor(
     private readonly repository: MemoryRepository,
@@ -230,8 +236,10 @@ export class ChatService {
   ): Promise<{ finalReply: string; toolResults: ToolResult[] }> {
     const toolDefinitions = this.buildToolDefinitions();
     const fullSystemPrompt = toolDefinitions
-      ? `${systemPrompt}\n\nTOOLS:\n${toolDefinitions}`
+      ? `${systemPrompt}\n\nTOOLS:\n${toolDefinitions}\n\nWhen you want to call a tool, output EXACTLY this JSON format and nothing else: {"tool": "tool_name", "arguments": {"param": "value"}}. Do not include markdown formatting, do not include extra text around the JSON.`
       : systemPrompt;
+
+    const startTime = Date.now();
 
     const result = await executeToolLoop({
       getModelResponse: async (messages) => {
@@ -286,11 +294,30 @@ export class ChatService {
             createdAt: new Date().toISOString(),
           })),
         ];
-        return this.aiClient.generateReply(responseMessages);
+        const registeredTools = this.toolExecutor ? this.toolExecutor.getTools() : [];
+        this.logger.info("runToolLoop model request", {
+          messageCount: responseMessages.length,
+          toolCount: registeredTools.length,
+          toolNames: registeredTools.map((t) => t.name),
+        });
+        const rawResponse = await this.aiClient.generateReply(responseMessages, registeredTools);
+        this.logger.info("runToolLoop model response", {
+          responsePreview: rawResponse.slice(0, 500),
+          responseLength: rawResponse.length,
+        });
+        return rawResponse;
       },
       executor: this.toolExecutor!,
       registry: this.toolExecutor!,
       maxIterations: this.maxToolIterations,
+    });
+
+    const elapsed = Date.now() - startTime;
+    this.logger.info("runToolLoop complete", {
+      toolCallsMade: result.toolCallsMade,
+      toolResults: result.toolResults.length,
+      finalReplyLength: result.finalReply.length,
+      latencyMs: elapsed,
     });
 
     return result;
@@ -323,6 +350,7 @@ export class ChatService {
       prompt: `Capability recall (confidence: ${result.confidence}): ${reply}`,
       reply,
       pendingConfirmations: [],
+      toolResults: [],
     };
   }
 
@@ -578,6 +606,7 @@ export class ChatService {
         prompt: clarificationPrompt,
         reply,
         pendingConfirmations: [],
+        toolResults: [],
       };
     }
 
@@ -608,10 +637,12 @@ export class ChatService {
 
     const rawReply = await this.aiClient.generateReply(messages);
     let reply: string;
+    let toolResults: ToolResult[] = [];
 
     if (this.toolExecutor) {
       const loopResult = await this.runToolLoop(prompt, resolvedMessage);
       reply = stripThinkTokens(loopResult.finalReply);
+      toolResults = loopResult.toolResults;
     } else {
       reply = stripThinkTokens(rawReply);
     }
@@ -632,6 +663,7 @@ export class ChatService {
       prompt,
       reply,
       pendingConfirmations: pipelineResult.pendingConfirmations,
+      toolResults,
     };
   }
 

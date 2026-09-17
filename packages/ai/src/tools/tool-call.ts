@@ -68,12 +68,16 @@ function extractJsonFromResponse(response: string): string | null {
 
 function hasToolField(obj: object): boolean {
   const record = obj as Record<string, unknown>;
-  return record.tool !== undefined || record.toolName !== undefined;
+  return record.tool !== undefined || record.toolName !== undefined || record.tool_name !== undefined || record.function_call !== undefined;
+}
+
+function sanitizeJsonString(json: string): string {
+  return json.replace(/\0/g, "");
 }
 
 function safeParseJson(json: string): unknown {
   try {
-    return JSON.parse(json);
+    return JSON.parse(sanitizeJsonString(json));
   } catch {
     return undefined;
   }
@@ -127,16 +131,21 @@ function tryExtractJsonFromText(text: string): string | null {
 }
 
 export function parseToolCall(response: string): ToolCallParseResult {
-  const jsonStr = extractJsonFromResponse(response);
+  if (!response) {
+    return { finalReply: "" };
+  }
+
+  const cleaned = response.replace(/\0/g, "");
+  const jsonStr = extractJsonFromResponse(cleaned);
 
   if (!jsonStr) {
     return { finalReply: response.trim() };
   }
 
-  let parsed: { tool?: string; toolName?: string; arguments?: Record<string, unknown> };
+  let parsed: { tool?: string; toolName?: string; tool_name?: string; function_call?: { name?: string; arguments?: Record<string, unknown> }; arguments?: Record<string, unknown> };
 
   try {
-    parsed = JSON.parse(jsonStr);
+    parsed = JSON.parse(sanitizeJsonString(jsonStr));
   } catch {
     return { finalReply: response.trim() };
   }
@@ -148,12 +157,40 @@ export function parseToolCall(response: string): ToolCallParseResult {
     if (parsed.toolName !== undefined && typeof parsed.toolName !== "string") {
       return { finalReply: response.trim() };
     }
+    if (parsed.tool_name !== undefined && typeof parsed.tool_name !== "string") {
+      return { finalReply: response.trim() };
+    }
     if (parsed.arguments !== undefined && (typeof parsed.arguments !== "object" || Array.isArray(parsed.arguments))) {
       return { finalReply: response.trim() };
     }
+    if (parsed.function_call !== undefined) {
+      if (typeof parsed.function_call !== "object" || Array.isArray(parsed.function_call)) {
+        return { finalReply: response.trim() };
+      }
+      if (parsed.function_call.name !== undefined && typeof parsed.function_call.name !== "string") {
+        return { finalReply: response.trim() };
+      }
+      if (parsed.function_call.arguments !== undefined && (typeof parsed.function_call.arguments !== "object" || Array.isArray(parsed.function_call.arguments))) {
+        return { finalReply: response.trim() };
+      }
+    }
   }
 
-  const toolName = parsed.tool ?? parsed.toolName;
+  if (parsed.function_call && typeof parsed.function_call === "object" && parsed.function_call.name) {
+    const toolName = parsed.function_call.name.trim();
+    const args = (parsed.function_call as { arguments?: Record<string, unknown> }).arguments;
+    if (args && (typeof args !== "object" || Array.isArray(args))) {
+      return { finalReply: response.trim() };
+    }
+    return {
+      toolCall: {
+        toolName,
+        arguments: (args ?? {}) as Record<string, unknown>,
+      },
+    };
+  }
+
+  const toolName = (parsed.tool ?? parsed.toolName ?? parsed.tool_name)?.trim?.();
 
   if (typeof toolName !== "string" || !toolName) {
     return { finalReply: response.trim() };
@@ -262,12 +299,19 @@ export async function executeToolLoop(options: ToolLoopOptions): Promise<ToolLoo
   return { finalReply, toolResults, toolCallsMade, iterationLimitReached, toolErrors, toolTimeouts };
 }
 
+function findToolByName(registry: ToolRegistryLike, name: string): Tool | undefined {
+  const exact = registry.get(name);
+  if (exact) return exact;
+  const lower = name.toLowerCase();
+  return registry.list().find((t) => t.name.toLowerCase() === lower);
+}
+
 function validateToolCall(
   executor: ToolExecutorLike,
   registry: ToolRegistryLike,
   toolCall: ToolCall,
 ): ToolResult | null {
-  const tool = registry.get(toolCall.toolName);
+  const tool = findToolByName(registry, toolCall.toolName);
 
   if (!tool) {
     return {

@@ -96,6 +96,40 @@
             border: 1px solid #334155;
         }
 
+        .message.tool-event {
+            align-self: flex-start;
+            background: #1a2e1a;
+            color: #a5d6a7;
+            border: 1px solid #22c55e;
+            border-bottom-left-radius: 0.25rem;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.875rem;
+        }
+
+        .message.tool-running {
+            align-self: flex-start;
+            background: #2e2a1a;
+            color: #fde047;
+            border: 1px solid #eab308;
+            border-bottom-left-radius: 0.25rem;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.875rem;
+        }
+
+        .message.tool-error {
+            align-self: flex-start;
+            background: #2e1a1a;
+            color: #fca5a5;
+            border: 1px solid #ef4444;
+            border-bottom-left-radius: 0.25rem;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.875rem;
+        }
+
+        .tool-icon {
+            margin-right: 0.5rem;
+        }
+
         .message.error {
             align-self: center;
             background: #7f1d1d;
@@ -385,55 +419,72 @@
             }
         }
 
-        async function sendMessage() {
-            const message = messageInput.value.trim();
-            if (!message || isGenerating) return;
+  async function sendMessage() {
+    const message = messageInput.value.trim();
+    if (!message || isGenerating) return;
 
-            isGenerating = true;
-            messageInput.value = '';
-            sendButton.disabled = true;
-            loading.classList.add('visible');
-            setStatus('Thinking...', true);
+    isGenerating = true;
+    messageInput.value = '';
+    sendButton.disabled = true;
+    loading.classList.add('visible');
+    setStatus('Thinking...', true);
 
-            addMessage('user', message);
+    addMessage('user', message);
 
-            try {
-                const response = await fetch(`${API_BASE}/chat`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        message,
-                        conversationId,
-                    }),
-                });
+    try {
+      const response = await fetch(`${API_BASE}/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message,
+          conversationId,
+        }),
+      });
 
-                const data = await response.json();
+      const data = await response.json();
 
-                if (!response.ok) {
-                    addMessage('error', data.error || 'Failed to send message');
-                    setStatus('Error', true);
-                    return;
-                }
+      if (!response.ok) {
+        addMessage('error', data.error || 'Failed to send message');
+        setStatus('Error', true);
+        return;
+      }
 
-                if (data.conversationId && !conversationId) {
-                    conversationId = data.conversationId;
-                }
+      if (data.conversationId && !conversationId) {
+        conversationId = data.conversationId;
+      }
 
-                addMessage('assistant', data.reply);
-                setStatus('Online', true);
-            } catch (error) {
-                addMessage('error', 'Network error: ' + error.message);
-                setStatus('Offline', false);
-            } finally {
-                isGenerating = false;
-                messageInput.disabled = false;
-                sendButton.disabled = false;
-                loading.classList.remove('visible');
-                messageInput.focus();
-            }
+      if (data.toolResults && data.toolResults.length > 0) {
+        for (const tr of data.toolResults) {
+          const statusKey = tr.status;
+          const statusLabel = statusKey.charAt(0).toUpperCase() + statusKey.slice(1);
+          const codeStr = tr.code ? ` [${tr.code}]` : '';
+          const durationStr = tr.durationMs != null ? ` ${tr.durationMs}ms` : '';
+          const resultPreview = tr.success && tr.output
+            ? ` → ${JSON.stringify(tr.output).slice(0, 200)}`
+            : tr.error ? ` → ${tr.error}` : '';
+
+          const eventClass = statusKey === 'success' ? 'tool-event' : statusKey === 'error' || statusKey === 'timeout' ? 'tool-error' : 'tool-running';
+          addMessage(eventClass, `🔧 ${tr.toolName}${codeStr} — ${statusLabel}${durationStr}${resultPreview}`);
         }
+      }
+
+      if (data.reply) {
+        addMessage('assistant', data.reply);
+      }
+      setStatus('Online', true);
+    } catch (error) {
+      addMessage('error', 'Network error: ' + error.message);
+      setStatus('Offline', false);
+    } finally {
+      isGenerating = false;
+      messageInput.disabled = false;
+      sendButton.disabled = false;
+      loading.classList.remove('visible');
+      messageInput.focus();
+    }
+  }
 
         sendButton.addEventListener('click', sendMessage);
 
